@@ -49,6 +49,8 @@ Queries Medusa seasonal anime using `GET /api/v2/anime/seasonal`.
   "season": "SPRING",
   "source": "myanimelist",
   "source_sort": "anime_num_list_users",
+  "page": 1,
+  "limit": 10,
   "fields": ["animeId", "displayTitle", "year", "animeType", "genres", "score", "imageUrl"]
 }
 ```
@@ -67,6 +69,8 @@ Arguments:
 | `season` | no | current anime season | `WINTER`, `SPRING`, `SUMMER`, `FALL`. If omitted, calculated from the MCP server's current month. |
 | `source` | no | `myanimelist` | `myanimelist`, `livechart` |
 | `source_sort` | no | `anime_num_list_users` | `anime_num_list_users`, `anime_score` |
+| `page` | no | `1` | Medusa result page number. Must be `1` or greater. |
+| `limit` | no | `10` | Results per page. Medusa allows `1` through `1000`; default is intentionally small to avoid MCP client truncation. |
 | `fields` | no | `null` | Optional list of response fields to keep. If omitted/null, the full Medusa anime objects are returned. |
 
 Current anime season defaults use this month mapping:

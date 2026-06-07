@@ -171,9 +171,11 @@ async def seasonal_anime(
     season: Season | None = None,
     source: AnimeSource = "myanimelist",
     source_sort: SeasonalSort = "anime_num_list_users",
+    page: int = 1,
+    limit: int = 10,
     fields: list[str] | None = None,
 ) -> Any:
-    """Query seasonal anime from Medusa, optionally returning only selected fields."""
+    """Query a paginated seasonal anime page from Medusa, optionally returning only selected fields."""
     default_year, default_season = _current_anime_season()
     query_year = year or default_year
     query_season = season or default_season
@@ -186,6 +188,8 @@ async def seasonal_anime(
             "season": query_season,
             "source": source,
             "sourceSort": source_sort,
+            "page": page,
+            "limit": limit,
         },
     )
     return _filter_payload(payload, fields)
