@@ -10,14 +10,36 @@ from urllib.parse import urljoin
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 Season = Literal["WINTER", "SPRING", "SUMMER", "FALL"]
 AnimeSource = Literal["myanimelist", "livechart"]
 SeasonalSort = Literal["anime_num_list_users", "anime_score"]
 
 DEFAULT_TIMEOUT = float(os.getenv("MEDUSA_TIMEOUT", "30"))
+DEFAULT_MCP_HOST = os.getenv("MCP_HOST", "0.0.0.0")
+DEFAULT_MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
 
-mcp = FastMCP("mcp-medusa")
+
+def _csv_env(name: str) -> list[str]:
+    return [value.strip() for value in os.getenv(name, "").split(",") if value.strip()]
+
+
+def _transport_security() -> TransportSecuritySettings:
+    enabled = os.getenv("MCP_DNS_REBINDING_PROTECTION", "false").strip().lower() in {"1", "true", "yes", "on"}
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=enabled,
+        allowed_hosts=_csv_env("MCP_ALLOWED_HOSTS"),
+        allowed_origins=_csv_env("MCP_ALLOWED_ORIGINS"),
+    )
+
+
+mcp = FastMCP(
+    "mcp-medusa",
+    host=DEFAULT_MCP_HOST,
+    port=DEFAULT_MCP_PORT,
+    transport_security=_transport_security(),
+)
 
 
 class MedusaError(RuntimeError):
@@ -172,8 +194,8 @@ async def seasonal_anime(
 def main() -> None:
     parser = argparse.ArgumentParser(description="MCP server for Medusa")
     parser.add_argument("--transport", choices=("stdio", "sse"), default=os.getenv("MCP_TRANSPORT", "stdio"))
-    parser.add_argument("--host", default=os.getenv("MCP_HOST", "0.0.0.0"))
-    parser.add_argument("--port", type=int, default=int(os.getenv("MCP_PORT", "8000")))
+    parser.add_argument("--host", default=DEFAULT_MCP_HOST)
+    parser.add_argument("--port", type=int, default=DEFAULT_MCP_PORT)
     args = parser.parse_args()
 
     if args.transport == "sse":

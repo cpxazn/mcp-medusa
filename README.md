@@ -97,6 +97,11 @@ Environment variables:
 | `MCP_TRANSPORT` | no | `stdio` or `sse`, default `stdio` |
 | `MCP_HOST` | no | SSE bind host, default `0.0.0.0` |
 | `MCP_PORT` | no | SSE bind port, default `8000` |
+| `MCP_DNS_REBINDING_PROTECTION` | no | Enable MCP SDK Host/Origin validation, default `false` |
+| `MCP_ALLOWED_HOSTS` | no | Comma-separated allowed `Host` headers when DNS rebinding protection is enabled, for example `daniel-nas.localdomain:3001,localhost:3001` |
+| `MCP_ALLOWED_ORIGINS` | no | Comma-separated allowed `Origin` headers when DNS rebinding protection is enabled |
+
+For container/SSE deployments, keep `MCP_HOST=0.0.0.0` or set it explicitly. DNS rebinding protection is disabled by default because mapped ports, reverse proxies, and LAN hostnames otherwise commonly cause `421 Misdirected Request` errors. If you enable it, include the externally visible host and port in `MCP_ALLOWED_HOSTS`.
 
 ## Run locally
 
