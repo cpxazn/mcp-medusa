@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 from datetime import date
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urljoin
 
 import httpx
@@ -112,6 +112,33 @@ def _current_anime_season(today: date | None = None) -> tuple[int, Season]:
     return today.year, "FALL"
 
 
+def _normalize_season(season: str | None) -> Season | None:
+    if season is None:
+        return None
+
+    normalized = season.strip().upper()
+    if normalized in ("WINTER", "SPRING", "SUMMER", "FALL"):
+        return cast(Season, normalized)
+
+    raise MedusaError("season must be one of: WINTER, SPRING, SUMMER, FALL")
+
+
+def _normalize_anime_source(source: str) -> AnimeSource:
+    normalized = source.strip().lower()
+    if normalized in ("myanimelist", "livechart"):
+        return cast(AnimeSource, normalized)
+
+    raise MedusaError("source must be one of: myanimelist, livechart")
+
+
+def _normalize_seasonal_sort(source_sort: str) -> SeasonalSort:
+    normalized = source_sort.strip().lower()
+    if normalized in ("anime_num_list_users", "anime_score"):
+        return cast(SeasonalSort, normalized)
+
+    raise MedusaError("source_sort must be one of: anime_num_list_users, anime_score")
+
+
 async def _request(method: str, path: str, **kwargs: Any) -> Any:
     _, api_key = _settings()
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, headers=_headers(api_key)) as client:
@@ -135,7 +162,7 @@ async def _request(method: str, path: str, **kwargs: Any) -> Any:
 async def add_anime(
     anime_id: int,
     root_dir: str,
-    source: AnimeSource = "myanimelist",
+    source: str = "myanimelist",
     anime: bool = True,
     scene: bool = False,
     status: str = "wanted",
@@ -147,7 +174,7 @@ async def add_anime(
     """Add an anime series to Medusa via /api/v2/anime/add."""
     body: dict[str, Any] = {
         "anime_id": anime_id,
-        "source": source,
+        "source": _normalize_anime_source(source),
         "root_dir": root_dir,
         "anime": anime,
         "scene": scene,
@@ -168,17 +195,22 @@ async def add_anime(
 @mcp.tool()
 async def seasonal_anime(
     year: int | None = None,
-    season: Season | None = None,
-    source: AnimeSource = "myanimelist",
-    source_sort: SeasonalSort = "anime_num_list_users",
+    season: str | None = None,
+    source: str = "myanimelist",
+    source_sort: str = "anime_num_list_users",
     page: int = 1,
     limit: int = 10,
     fields: list[str] | None = None,
 ) -> Any:
-    """Query a paginated seasonal anime page from Medusa, optionally returning only selected fields."""
+    """Query a paginated seasonal anime page from Medusa, optionally returning only selected fields.
+
+    Season, source, and source_sort are case-insensitive.
+    """
     default_year, default_season = _current_anime_season()
     query_year = year or default_year
-    query_season = season or default_season
+    query_season = _normalize_season(season) or default_season
+    query_source = _normalize_anime_source(source)
+    query_source_sort = _normalize_seasonal_sort(source_sort)
 
     payload = await _request(
         "GET",
@@ -186,8 +218,8 @@ async def seasonal_anime(
         params={
             "year": query_year,
             "season": query_season,
-            "source": source,
-            "sourceSort": source_sort,
+            "source": query_source,
+            "sourceSort": query_source_sort,
             "page": page,
             "limit": limit,
         },
