@@ -30,7 +30,7 @@ Arguments:
 | --- | --- | --- | --- |
 | `anime_id` | yes | none | Source-specific anime ID. For `myanimelist`, this is the MAL anime ID. |
 | `root_dir` | yes | none | Medusa root directory path for the new series. |
-| `source` | no | `myanimelist` | `myanimelist`, `livechart` |
+| `source` | no | `myanimelist` | Case-insensitive: `myanimelist`, `livechart` |
 | `anime` | no | `true` | Usually keep `true`. |
 | `scene` | no | `false` | Whether to enable scene numbering. |
 | `status` | no | `wanted` | Medusa episode status string, commonly `wanted`, `skipped`, or `ignored`. |
@@ -66,9 +66,9 @@ Arguments:
 | Argument | Required | Default | Allowed values / notes |
 | --- | --- | --- | --- |
 | `year` | no | current year | If omitted, calculated from the MCP server's current date. |
-| `season` | no | current anime season | `WINTER`, `SPRING`, `SUMMER`, `FALL`. If omitted, calculated from the MCP server's current month. |
-| `source` | no | `myanimelist` | `myanimelist`, `livechart` |
-| `source_sort` | no | `anime_num_list_users` | `anime_num_list_users`, `anime_score` |
+| `season` | no | current anime season | Case-insensitive: `WINTER`, `SPRING`, `SUMMER`, `FALL` or values like `Summer`. If omitted, calculated from the MCP server's current month. |
+| `source` | no | `myanimelist` | Case-insensitive: `myanimelist`, `livechart` |
+| `source_sort` | no | `anime_num_list_users` | Case-insensitive: `anime_num_list_users`, `anime_score` |
 | `page` | no | `1` | Medusa result page number. Must be `1` or greater. |
 | `limit` | no | `10` | Results per page. Medusa allows `1` through `1000`; default is intentionally small to avoid MCP client truncation. |
 | `fields` | no | `null` | Optional list of response fields to keep. If omitted/null, the full Medusa anime objects are returned. |
@@ -85,7 +85,7 @@ Current anime season defaults use this month mapping:
 Useful `fields` values include:
 
 ```json
-["animeId", "source", "displayTitle", "titleRomanji", "titleEnglish", "year", "season", "animeType", "status", "episodes", "episodeInfo", "genres", "studios", "score", "imageUrl", "anidbId", "tvdbId", "malId", "url", "directoryName"]
+["animeId", "source", "displayTitle", "titleRomanji", "titleEnglish", "year", "season", "animeType", "status", "episodes", "episodeInfo", "genres", "studios", "score", "numListUsers", "imageUrl", "anidbId", "tvdbId", "malId", "url", "directoryName"]
 ```
 
 ## Configuration
