@@ -88,6 +88,95 @@ Useful `fields` values include:
 ["animeId", "source", "displayTitle", "titleRomanji", "titleEnglish", "year", "season", "animeType", "status", "episodes", "episodeInfo", "genres", "studios", "score", "numListUsers", "imageUrl", "anidbId", "tvdbId", "malId", "url", "directoryName"]
 ```
 
+### `resolve_anime_title`
+
+Resolves a title to enriched Medusa/MyAnimeList candidates using `GET /api/v2/anime/search` with `source`, `includeDetails=true`, and `limit`.
+
+```json
+{
+  "title": "Frieren",
+  "source": "myanimelist",
+  "limit": 10,
+  "min_score": 88,
+  "score_gap": 8
+}
+```
+
+Returns `decision` as `match`, `ambiguous`, or `no_match`, plus scored candidates.
+
+### `anime_info`
+
+Returns compact anime details and Medusa presence by title or MAL ID without adding anything.
+
+```json
+{
+  "title": "Frieren",
+  "source": "myanimelist"
+}
+```
+
+or:
+
+```json
+{
+  "mal_id": 52991,
+  "source": "myanimelist"
+}
+```
+
+### `seasonal_candidates`
+
+Fetches seasonal candidates using Medusa's server-side seasonal filters before applying residual OpenClaw-specific heuristics.
+
+```json
+{
+  "year": 2026,
+  "season": "SUMMER",
+  "source": "myanimelist",
+  "limit": 25,
+  "min_num_list_users": 3000,
+  "fields": ["animeId", "displayTitle", "animeType", "genres", "numListUsers", "synopsis"]
+}
+```
+
+The MCP tool sends Medusa filters such as `animeType=TV`, `minNumListUsers`, `excludeGenres=Kids,Boys Love`, `matched=false`, `firstSeasonOnly=true`, and `fields` to reduce payload size.
+
+### `prepare_seasonal_review`
+
+Compacts seasonal candidate items into an AI review packet with conservative review instructions.
+
+```json
+{
+  "items": [{"animeId": 62076, "displayTitle": "Example Title"}],
+  "max_items": 25
+}
+```
+
+### `resolve_and_add_anime`
+
+Resolves and dry-runs or executes a single add through Medusa's bulk-add endpoint. Writes require `execute: true`.
+
+```json
+{
+  "title": "Frieren",
+  "root_dir": "/media/videos/Anime",
+  "execute": false
+}
+```
+
+### `bulk_add_anime`
+
+Dry-runs or executes multiple anime adds through `POST /api/v2/anime/bulk-add`. Writes require `execute: true`.
+
+```json
+{
+  "items": [{"animeId": 62076, "displayTitle": "Example Title", "aiDecision": "add"}],
+  "decision_field": "aiDecision",
+  "allowed_decisions": ["add"],
+  "execute": false
+}
+```
+
 ## Configuration
 
 Environment variables:
