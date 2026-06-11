@@ -456,6 +456,99 @@ def _compact_review_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def diagnose_release_groups(
+    series_slug: str,
+    season: int = 1,
+    episode: int = 1,
+    max_retries: int = 3,
+    retry_delay_seconds: float = 5.0,
+) -> dict[str, Any]:
+    """Diagnose release group issues for a series by comparing config vs available releases.
+
+    Checks provider cache first; if empty, triggers a manual search and retries.
+    Returns a structured diagnosis with recommendation.
+
+    Args:
+        series_slug: Series slug (e.g. "tvdb1234").
+        season: Season number to check (default: 1).
+        episode: Episode number to check (default: 1).
+        max_retries: How many times to retry when a search is in progress (default: 3).
+        retry_delay_seconds: Seconds to wait between retries (default: 5.0).
+    """
+    import asyncio
+
+    for attempt in range(max_retries + 1):
+        result = await _request(
+            "POST",
+            f"series/{series_slug}/release/diagnose",
+            json={"season": season, "episode": episode},
+        )
+
+        if not isinstance(result, dict):
+            raise MedusaError(f"unexpected diagnose payload shape: {type(result).__name__}")
+
+        search_triggered = result.get("searchTriggered", False)
+        diagnosis = result.get("diagnosis", {})
+        diagnosis_code = diagnosis.get("code") if isinstance(diagnosis, dict) else None
+
+        # If search is still in progress and we have retries left, wait and retry
+        if diagnosis_code == "search_in_progress" and search_triggered and attempt < max_retries:
+            await asyncio.sleep(retry_delay_seconds)
+            continue
+
+        return result
+
+    # Should not reach here, but if all retries exhausted:
+    return {
+        "config": result.get("config", {}),
+        "episode": result.get("episode", {}),
+        "availableGroups": [],
+        "searchTriggered": True,
+        "diagnosis": {
+            "code": "search_timed_out",
+            "summary": f"Search still in progress after {max_retries} retries. Try again later.",
+            "recommendation": None,
+        },
+    }
+
+
+@mcp.tool()
+async def update_release_groups(
+    series_slug: str,
+    whitelist: list[str] | None = None,
+    blacklist: list[str] | None = None,
+    fallback_groups: list[str] | None = None,
+    fallback_days: int | None = None,
+) -> dict[str, Any]:
+    """Update release group configuration for a series.
+
+    Sends PATCH /api/v2/series/{slug} with the specified config.release.* fields.
+    Only the provided fields are changed; omitted fields are left as-is.
+
+    Args:
+        series_slug: Series slug (e.g. "tvdb1234").
+        whitelist: Whitelisted release groups.
+        blacklist: Blacklisted release groups.
+        fallback_groups: Anime release group fallback list (in priority order).
+        fallback_days: Days before falling back to the next group.
+    """
+    release: dict[str, Any] = {}
+    if whitelist is not None:
+        release["whitelist"] = whitelist
+    if blacklist is not None:
+        release["blacklist"] = blacklist
+    if fallback_groups is not None:
+        release["fallbackGroups"] = fallback_groups
+    if fallback_days is not None:
+        release["fallbackDays"] = fallback_days
+
+    if not release:
+        raise MedusaError("at least one of whitelist, blacklist, fallback_groups, or fallback_days must be provided")
+
+    return await _request("PATCH", f"series/{series_slug}", json={"config": {"release": release}})
+
+
+@mcp.tool()
 async def add_anime(
     anime_id: int,
     root_dir: str,
