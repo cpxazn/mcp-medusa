@@ -549,6 +549,68 @@ async def update_release_groups(
 
 
 @mcp.tool()
+async def get_aliases(
+    series_slug: str,
+    season: int | None = None,
+) -> list[dict[str, Any]]:
+    """List scene exceptions (aliases) for a series.
+
+    Scene exceptions are alternative episode/release titles that Medusa
+    recognizes when searching. This tool reads them; use create_alias to add new ones.
+
+    Args:
+        series_slug: Series slug (e.g. "tvdb1234").
+        season: Optional season number to filter by.
+    """
+    params: dict[str, Any] = {"series": series_slug}
+    if season is not None:
+        params["season"] = season
+
+    result = await _request("GET", "alias", params=params)
+    if isinstance(result, list):
+        return result
+    raise MedusaError(f"unexpected alias list shape: {type(result).__name__}")
+
+
+@mcp.tool()
+async def create_alias(
+    series_slug: str,
+    name: str,
+    season: int | None = None,
+) -> dict[str, Any]:
+    """Create a local scene exception (alias) for a series.
+
+    This enables Medusa to recognize an alternative release title when searching,
+    allowing it to match releases that use a different naming scheme.
+    Only local (user-managed) scene exceptions can be created via this tool.
+
+    Args:
+        series_slug: Series slug (e.g. "tvdb1234").
+        name: The alternative title to add as a scene exception.
+        season: Optional season number. If omitted, applies to all seasons.
+    """
+    body: dict[str, Any] = {
+        "series": series_slug,
+        "name": name,
+        "type": "local",
+    }
+    if season is not None:
+        body["season"] = season
+
+    return await _request("POST", "alias", json=body)
+
+
+@mcp.tool()
+async def delete_alias(alias_id: int) -> None:
+    """Delete a scene exception (alias) by ID.
+
+    Args:
+        alias_id: The alias ID to delete.
+    """
+    await _request("DELETE", f"alias/{alias_id}")
+
+
+@mcp.tool()
 async def add_anime(
     anime_id: int,
     root_dir: str,
