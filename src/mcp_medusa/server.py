@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import difflib
+import argparse
 import difflib
 import os
 import re
@@ -25,7 +28,9 @@ DEFAULT_MCP_HOST = os.getenv("MCP_HOST", "0.0.0.0")
 DEFAULT_MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
 DEFAULT_ROOT_DIR = os.getenv("MEDUSA_DEFAULT_ANIME_ROOT_DIR", "/media/videos/Anime")
 DEFAULT_INITIAL_RELEASE_GROUP = os.getenv("MEDUSA_DEFAULT_INITIAL_RELEASE_GROUP", "SubsPlease")
-DEFAULT_RELEASE_GROUP_FALLBACK_DAYS = int(os.getenv("MEDUSA_DEFAULT_RELEASE_GROUP_FALLBACK_DAYS", "7"))
+DEFAULT_RELEASE_GROUP_FALLBACK_DAYS = int(
+    os.getenv("MEDUSA_DEFAULT_RELEASE_GROUP_FALLBACK_DAYS", "7")
+)
 
 CHIBI_SPINOFF_TITLE_KEYWORDS = [" wan!", " chibi", " mini", " petit", " puchi"]
 CHIBI_SPINOFF_SYNOPSIS_KEYWORDS = ["chibi", "spin-off", "spinoff", "gag"]
@@ -88,7 +93,12 @@ def _csv_env(name: str) -> list[str]:
 
 
 def _transport_security() -> TransportSecuritySettings:
-    enabled = os.getenv("MCP_DNS_REBINDING_PROTECTION", "false").strip().lower() in {"1", "true", "yes", "on"}
+    enabled = os.getenv("MCP_DNS_REBINDING_PROTECTION", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=enabled,
         allowed_hosts=_csv_env("MCP_ALLOWED_HOSTS"),
@@ -154,12 +164,17 @@ def _filter_payload(payload: Any, fields: list[str] | None) -> Any:
         return payload
 
     if isinstance(payload, list):
-        return [_filter_fields(item, fields) if isinstance(item, dict) else item for item in payload]
+        return [
+            _filter_fields(item, fields) if isinstance(item, dict) else item for item in payload
+        ]
 
     if isinstance(payload, dict):
         if isinstance(payload.get("items"), list):
             filtered = dict(payload)
-            filtered["items"] = [_filter_fields(item, fields) if isinstance(item, dict) else item for item in payload["items"]]
+            filtered["items"] = [
+                _filter_fields(item, fields) if isinstance(item, dict) else item
+                for item in payload["items"]
+            ]
             return filtered
         return _filter_fields(payload, fields)
 
@@ -235,6 +250,24 @@ async def _request(method: str, path: str, **kwargs: Any) -> Any:
     return _unwrap_response(payload)
 
 
+
+def _scheduler_issue_summary(schedulers: dict[str, Any]) -> str | None:
+    """Return a human-readable summary of any scheduler issues, or None if healthy."""
+    issues: list[str] = []
+    for key, info in schedulers.items():
+        name = info.get("name", key)
+        if not info.get("isAlive"):
+            issues.append(f"{name}: thread is DEAD — needs restart")
+        elif info.get("isEnabled") and not info.get("isAlive"):
+            issues.append(f"{name}: enabled but thread not alive")
+    if issues:
+        return " | ".join(issues)
+
+    show_queue = schedulers.get("showQueue", {})
+    if show_queue.get("isAlive") and show_queue.get("isEnabled") and show_queue.get("queueLength", 0) > 0:
+        return f"ShowQueue has {show_queue['queueLength']} pending items (may be processing or stuck)"
+
+    return None
 def _normalize_title(value: Any) -> str:
     if value is None:
         return ""
@@ -276,7 +309,10 @@ def _candidate_score(query: str, item: dict[str, Any], rank: int) -> float:
         elif normalized_title in normalized_query:
             best = max(best, 88.0)
         else:
-            best = max(best, difflib.SequenceMatcher(None, normalized_query, normalized_title).ratio() * 100)
+            best = max(
+                best,
+                difflib.SequenceMatcher(None, normalized_query, normalized_title).ratio() * 100,
+            )
 
     rank_bonus = max(0.0, 8.0 - (rank * 2.0))
     return min(100.0, best + rank_bonus)
@@ -284,11 +320,15 @@ def _candidate_score(query: str, item: dict[str, Any], rank: int) -> float:
 
 def _has_exact_title_match(query: str, item: dict[str, Any]) -> bool:
     normalized_query = _normalize_title(query)
-    return bool(normalized_query) and any(_normalize_title(title) == normalized_query for title in _title_values(item))
+    return bool(normalized_query) and any(
+        _normalize_title(title) == normalized_query for title in _title_values(item)
+    )
 
 
 async def _anime_details(anime_id: int, source: str) -> dict[str, Any]:
-    payload = await _request("GET", "anime/details", params={"id": anime_id, "source": _normalize_anime_source(source)})
+    payload = await _request(
+        "GET", "anime/details", params={"id": anime_id, "source": _normalize_anime_source(source)}
+    )
     if not isinstance(payload, dict):
         raise MedusaError(f"unexpected anime details payload shape: {type(payload).__name__}")
     return payload
@@ -316,7 +356,9 @@ async def _search_anime(query: str, source: str, limit: int) -> list[dict[str, A
     return candidates
 
 
-def _confident_match(candidates: list[dict[str, Any]], min_score: float, score_gap: float) -> dict[str, Any] | None:
+def _confident_match(
+    candidates: list[dict[str, Any]], min_score: float, score_gap: float
+) -> dict[str, Any] | None:
     if not candidates:
         return None
 
@@ -334,7 +376,9 @@ def _confident_match(candidates: list[dict[str, Any]], min_score: float, score_g
 def _compact_anime_summary(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "animeId": item.get("animeId") or item.get("malId"),
-        "displayTitle": item.get("displayTitle") or item.get("titleEnglish") or item.get("titleRomanji"),
+        "displayTitle": item.get("displayTitle")
+        or item.get("titleEnglish")
+        or item.get("titleRomanji"),
         "titleRomanji": item.get("titleRomanji"),
         "titleEnglish": item.get("titleEnglish"),
         "animeType": item.get("animeType"),
@@ -389,7 +433,9 @@ def _normalized_text(value: Any) -> str:
 
 
 def _title_text(item: dict[str, Any]) -> str:
-    return " ".join(_normalized_text(item.get(key)) for key in ("displayTitle", "titleRomanji", "titleEnglish"))
+    return " ".join(
+        _normalized_text(item.get(key)) for key in ("displayTitle", "titleRomanji", "titleEnglish")
+    )
 
 
 def _genre_set(item: dict[str, Any]) -> set[str]:
@@ -405,29 +451,81 @@ def _hard_exclusion_reasons(item: dict[str, Any], min_num_list_users: int) -> li
     num_list_users = item.get("numListUsers")
 
     if min_num_list_users > 0 and (num_list_users is None or num_list_users < min_num_list_users):
-        reasons.append({"ruleId": "exclude_low_num_list_users", "reason": f"numListUsers is below {min_num_list_users}.", "source": "source_data"})
+        reasons.append(
+            {
+                "ruleId": "exclude_low_num_list_users",
+                "reason": f"numListUsers is below {min_num_list_users}.",
+                "source": "source_data",
+            }
+        )
     if anime_type != "tv":
-        reasons.append({"ruleId": "exclude_non_tv", "reason": "Anime type is not TV.", "source": "source_data"})
-    if any(pattern.search(synopsis) for pattern in NOT_FIRST_SEASON_SYNOPSIS_PATTERNS) or any(pattern.search(title) for pattern in NOT_FIRST_SEASON_TITLE_PATTERNS):
-        reasons.append({"ruleId": "exclude_not_first_season", "reason": "Title/synopsis indicates this is not the first season or part.", "source": "source_data"})
+        reasons.append(
+            {"ruleId": "exclude_non_tv", "reason": "Anime type is not TV.", "source": "source_data"}
+        )
+    if any(pattern.search(synopsis) for pattern in NOT_FIRST_SEASON_SYNOPSIS_PATTERNS) or any(
+        pattern.search(title) for pattern in NOT_FIRST_SEASON_TITLE_PATTERNS
+    ):
+        reasons.append(
+            {
+                "ruleId": "exclude_not_first_season",
+                "reason": "Title/synopsis indicates this is not the first season or part.",
+                "source": "source_data",
+            }
+        )
     if genres & KIDS_GENRES:
-        reasons.append({"ruleId": "exclude_kids", "reason": "Genre indicates anime aimed at kids.", "source": "source_data"})
+        reasons.append(
+            {
+                "ruleId": "exclude_kids",
+                "reason": "Genre indicates anime aimed at kids.",
+                "source": "source_data",
+            }
+        )
     if genres & BOYS_LOVE_GENRES:
-        reasons.append({"ruleId": "exclude_boys_love", "reason": "Genre indicates boys love.", "source": "source_data"})
+        reasons.append(
+            {
+                "ruleId": "exclude_boys_love",
+                "reason": "Genre indicates boys love.",
+                "source": "source_data",
+            }
+        )
 
-    is_allowlisted_music_story = any(keyword in title for keyword in MUSIC_STORY_ALLOWLIST_TITLE_KEYWORDS)
+    is_allowlisted_music_story = any(
+        keyword in title for keyword in MUSIC_STORY_ALLOWLIST_TITLE_KEYWORDS
+    )
     has_music_genre = "music" in genres
     has_idol_genre = any("idol" in genre for genre in genres)
-    has_idol_music_franchise_title = any(keyword in title for keyword in IDOL_MUSIC_FRANCHISE_TITLE_KEYWORDS)
-    if not is_allowlisted_music_story and has_music_genre and (has_idol_genre or has_idol_music_franchise_title):
-        reasons.append({"ruleId": "exclude_idol_music_franchise", "reason": "Music/idol franchise pattern; excludes idol-adjacent media franchise entries, not all music anime.", "source": "heuristic"})
+    has_idol_music_franchise_title = any(
+        keyword in title for keyword in IDOL_MUSIC_FRANCHISE_TITLE_KEYWORDS
+    )
+    if (
+        not is_allowlisted_music_story
+        and has_music_genre
+        and (has_idol_genre or has_idol_music_franchise_title)
+    ):
+        reasons.append(
+            {
+                "ruleId": "exclude_idol_music_franchise",
+                "reason": "Music/idol franchise pattern; excludes idol-adjacent media franchise entries, not all music anime.",
+                "source": "heuristic",
+            }
+        )
 
     title_has_chibi_pattern = any(keyword in title for keyword in CHIBI_SPINOFF_TITLE_KEYWORDS)
-    synopsis_has_chibi_pattern = any(keyword in synopsis for keyword in CHIBI_SPINOFF_SYNOPSIS_KEYWORDS)
+    synopsis_has_chibi_pattern = any(
+        keyword in synopsis for keyword in CHIBI_SPINOFF_SYNOPSIS_KEYWORDS
+    )
     is_comedy = "comedy" in genres
     is_sequel_or_spinoff = "season" in synopsis or "spin-off" in synopsis or "spinoff" in synopsis
-    if title_has_chibi_pattern or (synopsis_has_chibi_pattern and is_comedy and is_sequel_or_spinoff):
-        reasons.append({"ruleId": "exclude_chibi_spinoff", "reason": "Title/synopsis pattern suggests a chibi or gag spin-off.", "source": "heuristic"})
+    if title_has_chibi_pattern or (
+        synopsis_has_chibi_pattern and is_comedy and is_sequel_or_spinoff
+    ):
+        reasons.append(
+            {
+                "ruleId": "exclude_chibi_spinoff",
+                "reason": "Title/synopsis pattern suggests a chibi or gag spin-off.",
+                "source": "heuristic",
+            }
+        )
 
     return reasons
 
@@ -477,6 +575,7 @@ async def diagnose_release_groups(
     """
     import asyncio
 
+    result: dict[str, Any] = {}
     for attempt in range(max_retries + 1):
         result = await _request(
             "POST",
@@ -543,7 +642,9 @@ async def update_release_groups(
         release["fallbackDays"] = fallback_days
 
     if not release:
-        raise MedusaError("at least one of whitelist, blacklist, fallback_groups, or fallback_days must be provided")
+        raise MedusaError(
+            "at least one of whitelist, blacklist, fallback_groups, or fallback_days must be provided"
+        )
 
     return await _request("PATCH", f"series/{series_slug}", json={"config": {"release": release}})
 
@@ -611,6 +712,67 @@ async def delete_alias(alias_id: int) -> None:
 
 
 @mcp.tool()
+async def scheduler_status() -> dict[str, Any]:
+    """Return Medusa scheduler and queue status.
+
+    Shows whether each scheduler thread is alive, enabled, and currently active.
+    Useful for diagnosing stuck queues."""
+    config = await _request("GET", "config")
+    if not isinstance(config, dict):
+        raise MedusaError(f"unexpected config shape: {type(config).__name__}")
+
+    system = config.get("system", {})
+    schedulers = system.get("schedulers", [])
+
+    queue_info: dict[str, Any] = {}
+    for s in schedulers:
+        key = s.get("key", "unknown")
+        queue_info[key] = {
+            "name": s.get("name", key),
+            "isAlive": s.get("isAlive"),
+            "isEnabled": s.get("isEnabled"),
+            "isActive": s.get("isActive"),
+            "queueLength": s.get("queueLength", 0),
+        }
+
+    return {
+        "schedulers": queue_info,
+        "issueSummary": _scheduler_issue_summary(queue_info),
+    }
+
+
+@mcp.tool()
+async def search_tvdb(
+    query: str,
+    language: str = "en",
+) -> list[dict[str, Any]]:
+    """Search TVDB for a show by name and return matching TVDB IDs.
+
+    Use this when an anime add fails due to AniDB-to-TVDB mapping issues.
+    Find the correct TVDB ID here, then add the show via the Medusa web UI
+    or the /api/v2/series endpoint with the TVDB ID directly."""
+    payload = await _request(
+        "GET",
+        "internal/searchIndexersForShowName",
+        params={"query": query, "indexerId": "1", "language": language},
+    )
+    results: list[dict[str, Any]] = []
+    raw_results = payload.get("results", []) if isinstance(payload, dict) else []
+    for entry in raw_results:
+        if isinstance(entry, list) and len(entry) >= 5:
+            results.append({
+                "indexer": entry[0],
+                "indexerId": entry[1],
+                "url": entry[2] + str(entry[3]) if isinstance(entry[2], str) else "",
+                "tvdbId": entry[3],
+                "title": entry[4],
+                "firstAired": entry[5] if len(entry) > 5 else None,
+                "network": entry[6] if len(entry) > 6 else None,
+                "overview": entry[7] if len(entry) > 7 else None,
+            })
+    return results
+
+@mcp.tool()
 async def add_anime(
     anime_id: int,
     root_dir: str,
@@ -622,8 +784,13 @@ async def add_anime(
     fallback_release_groups: list[str] | None = None,
     release_group_fallback_days: int = 7,
     directory_name: str | None = None,
+    language: str | None = None,
 ) -> Any:
-    """Add an anime series to Medusa via /api/v2/anime/add."""
+    """Add an anime series to Medusa via /api/v2/anime/add.
+
+    Note: Some anime may fail with "no name on TVDBv2" due to
+    AniDB→TVDB ID mapping issues. As a workaround, find the TVDB ID via
+    /api/v2/internal/searchIndexersForShowName and add via the series endpoint."""
     body: dict[str, Any] = {
         "anime_id": anime_id,
         "source": _normalize_anime_source(source),
@@ -638,8 +805,11 @@ async def add_anime(
         "initial_release_group": initial_release_group,
         "fallback_release_groups": fallback_release_groups,
         "directory_name": directory_name,
+        "language": language,
     }
-    body.update({key: value for key, value in optional_values.items() if value not in (None, "", [])})
+    body.update(
+        {key: value for key, value in optional_values.items() if value not in (None, "", [])}
+    )
 
     return await _request("POST", "anime/add", json=body)
 
@@ -666,7 +836,9 @@ async def _bulk_add_request(
         "initial_release_group": initial_release_group,
         "fallback_release_groups": fallback_release_groups,
     }
-    defaults.update({key: value for key, value in optional_defaults.items() if value not in (None, "", [])})
+    defaults.update(
+        {key: value for key, value in optional_defaults.items() if value not in (None, "", [])}
+    )
 
     payload = await _request(
         "POST",
@@ -698,7 +870,14 @@ async def seasonal_anime(
     query_source = _normalize_anime_source(source)
     query_source_sort = _normalize_seasonal_sort(source_sort)
 
-    params: dict[str, Any] = {"year": query_year, "season": query_season, "source": query_source, "sourceSort": query_source_sort, "page": page, "limit": limit}
+    params: dict[str, Any] = {
+        "year": query_year,
+        "season": query_season,
+        "source": query_source,
+        "sourceSort": query_source_sort,
+        "page": page,
+        "limit": limit,
+    }
     if fields:
         params["fields"] = _csv_param(fields)
 
@@ -743,24 +922,28 @@ async def anime_info(
 ) -> dict[str, Any]:
     """Return compact anime details and Medusa presence by title or MAL ID. Does not add anime."""
     query_source = _normalize_anime_source(source)
-    anime_id = mal_id
+    anime_id: int | None = mal_id
     resolution: dict[str, Any] | None = None
 
     if anime_id is None:
         if not title:
             raise MedusaError("provide title or mal_id")
-        resolution = await resolve_anime_title(title, query_source, limit, min_score, score_gap)
-        if resolution["decision"] != "match":
-            return resolution
-        match = resolution.get("match") or {}
-        anime_id = match.get("animeId") or match.get("malId")
+        resolved = await resolve_anime_title(title, query_source, limit, min_score, score_gap)
+        if resolved["decision"] != "match":
+            return resolved
+        resolution = resolved
+        resolved_match: dict[str, Any] = resolved.get("match") or {}
+        anime_id = resolved_match.get("animeId") or resolved_match.get("malId")
 
     if not isinstance(anime_id, int):
         raise MedusaError("resolved match did not include an integer MAL ID")
 
     summary = _details_summary(await _anime_details(anime_id, query_source), max_synopsis_chars)
     if resolution is not None:
-        summary["resolution"] = {"decision": resolution["decision"], "match": _compact_anime_summary(resolution.get("match") or {})}
+        summary["resolution"] = {
+            "decision": resolution["decision"],
+            "match": _compact_anime_summary(resolution.get("match") or {}),
+        }
     return summary
 
 
@@ -771,7 +954,7 @@ async def seasonal_candidates(
     source: str = "myanimelist",
     source_sort: str = "anime_num_list_users",
     limit: int = 25,
-    max_pages: int = 100,
+    max_pages: int = 3,
     min_num_list_users: int = 3000,
     include_skipped: bool = False,
     fields: list[str] | None = None,
@@ -850,9 +1033,15 @@ async def seasonal_candidates(
 
 
 @mcp.tool()
-async def prepare_seasonal_review(items: list[dict[str, Any]], max_items: int | None = None) -> dict[str, Any]:
+async def prepare_seasonal_review(
+    items: list[dict[str, Any]], max_items: int | None = None
+) -> dict[str, Any]:
     """Compact seasonal candidates into an AI review packet."""
-    candidates = [_compact_review_item(item) for item in items if isinstance(item, dict) and item.get("filterDecision") != "skip"]
+    candidates = [
+        _compact_review_item(item)
+        for item in items
+        if isinstance(item, dict) and item.get("filterDecision") != "skip"
+    ]
     if max_items is not None:
         candidates = candidates[:max_items]
     return {
@@ -881,8 +1070,6 @@ async def resolve_and_add_anime(
     execute: bool = False,
 ) -> dict[str, Any]:
     """Resolve and optionally add one anime. Dry-run unless execute is true."""
-    # Kept for backward-compatible MCP schemas; Medusa bulk-add now owns verification.
-    _ = (verify_attempts, verify_delay_seconds)
     query_source = _normalize_anime_source(source)
     match: dict[str, Any] | None
     candidates: list[dict[str, Any]] = []
@@ -918,7 +1105,11 @@ async def resolve_and_add_anime(
         "fallback_release_groups": fallback_release_groups,
         "directory_name": directory_name,
     }
-    plan = {"decision": "execute" if execute else "dry_run", "match": _compact_anime_summary(match or {}), "addArguments": add_arguments}
+    plan = {
+        "decision": "execute" if execute else "dry_run",
+        "match": _compact_anime_summary(match or {}),
+        "addArguments": add_arguments,
+    }
     if candidates:
         plan["candidates"] = candidates
 
@@ -933,7 +1124,38 @@ async def resolve_and_add_anime(
         verify=execute,
     )
     first_result = (add_result.get("results") or [{}])[0]
-    return {**plan, "addResult": add_result, "result": first_result, "success": bool(first_result.get("success"))}
+
+    response: dict[str, Any] = {
+        **plan,
+        "addResult": add_result,
+        "result": first_result,
+        "success": bool(first_result.get("success")),
+    }
+
+    # Post-add verification: poll anime_info to confirm the show actually landed.
+    # The bulk-add returns success as soon as the item is queued, but the actual
+    # add happens asynchronously in the show queue and can fail (e.g. TVDB issues).
+    if execute and response["success"]:
+        for attempt in range(1, verify_attempts + 1):
+            await asyncio.sleep(verify_delay_seconds)
+            try:
+                info = await anime_info(mal_id=anime_id, source=query_source)
+            except MedusaError:
+                continue
+            if isinstance(info, dict) and info.get("matched"):
+                response["verified"] = True
+                response["match"] = info
+                break
+        else:
+            response["verified"] = False
+            response["verificationHint"] = (
+                "Add queued but not confirmed in Medusa after polling. "
+                "The show queue likely failed (common cause: AniDB to TVDB mapping issue). "
+                "Use scheduler_status to check queue health, then fall back to "
+                "search_tvdb to find the TVDB ID and add via the series endpoint."
+            )
+
+    return response
 
 
 @mcp.tool()
@@ -973,9 +1195,22 @@ async def bulk_add_anime(
     local_failures: list[dict[str, Any]] = []
     for item in selected:
         anime_id = item.get("animeId") or item.get("malId")
-        title = item.get("displayTitle") or item.get("titleEnglish") or item.get("titleRomanji") or anime_id or "(untitled)"
+        title = (
+            item.get("displayTitle")
+            or item.get("titleEnglish")
+            or item.get("titleRomanji")
+            or anime_id
+            or "(untitled)"
+        )
         if not isinstance(anime_id, int):
-            local_failures.append({"title": title, "success": False, "error": "Missing animeId/malId.", "dryRun": not execute})
+            local_failures.append(
+                {
+                    "title": title,
+                    "success": False,
+                    "error": "Missing animeId/malId.",
+                    "dryRun": not execute,
+                }
+            )
             continue
 
         request_item: dict[str, Any] = {"anime_id": anime_id}
@@ -996,7 +1231,13 @@ async def bulk_add_anime(
             verify=execute,
         )
     else:
-        response = {"dryRun": not execute, "requested": 0, "successes": 0, "failures": 0, "results": []}
+        response = {
+            "dryRun": not execute,
+            "requested": 0,
+            "successes": 0,
+            "failures": 0,
+            "results": [],
+        }
 
     results = [*(response.get("results") or []), *local_failures]
     return {
@@ -1011,7 +1252,9 @@ async def bulk_add_anime(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="MCP server for Medusa")
-    parser.add_argument("--transport", choices=("stdio", "sse"), default=os.getenv("MCP_TRANSPORT", "stdio"))
+    parser.add_argument(
+        "--transport", choices=("stdio", "sse"), default=os.getenv("MCP_TRANSPORT", "stdio")
+    )
     parser.add_argument("--host", default=DEFAULT_MCP_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_MCP_PORT)
     args = parser.parse_args()
