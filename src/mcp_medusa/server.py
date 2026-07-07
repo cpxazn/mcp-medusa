@@ -231,6 +231,37 @@ def _normalize_seasonal_sort(source_sort: str) -> SeasonalSort:
     raise MedusaError("source_sort must be one of: anime_num_list_users, anime_score")
 
 
+def _parse_status_name(status: str) -> int:
+    """Convert a status string (e.g. 'wanted') to Medusa's numeric episode status."""
+    try:
+        status_id = int(status)
+    except (TypeError, ValueError):
+        status_id = None
+
+    if status_id is not None:
+        return status_id
+
+    status_lower = status.strip().lower()
+    status_map = {
+        "wanted": 3,
+        "skipped": 5,
+        "ignored": 7,
+        "downloaded": 4,
+        "archived": 6,
+        "snatched": 2,
+        "unaired": 1,
+        "failed": 11,
+        "subtitled": 10,
+        "unset": -1,
+    }
+    if status_lower in status_map:
+        return status_map[status_lower]
+
+    raise MedusaError(
+        f"Unknown status: {status!r}. Valid: {', '.join(sorted(status_map.keys()))}"
+    )
+
+
 async def _request(method: str, path: str, **kwargs: Any) -> Any:
     _, api_key = _settings()
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, headers=_headers(api_key)) as client:
@@ -749,8 +780,7 @@ async def search_tvdb(
     """Search TVDB for a show by name and return matching TVDB IDs.
 
     Use this when an anime add fails due to AniDB-to-TVDB mapping issues.
-    Find the correct TVDB ID here, then add the show via the Medusa web UI
-    or the /api/v2/series endpoint with the TVDB ID directly."""
+    Find the correct TVDB ID here, then add the show with add_series."""
     payload = await _request(
         "GET",
         "internal/searchIndexersForShowName",
@@ -772,6 +802,43 @@ async def search_tvdb(
             })
     return results
 
+
+@mcp.tool()
+async def add_series(
+    tvdb_id: int,
+    root_dir: str,
+    anime: bool = True,
+    status: str = "wanted",
+    language: str | None = None,
+    show_dir: str | None = None,
+    scene: bool = False,
+    paused: bool = False,
+) -> Any:
+    """Add a series to Medusa directly by TVDB ID via POST /api/v2/series.
+
+    Use this as a fallback when add_anime fails due to AniDB-to-TVDB mapping
+    issues.  First find the correct TVDB ID with search_tvdb, then add it
+    here.  This bypasses anime resolution entirely and adds via the standard
+    series endpoint."""
+    numeric_status = _parse_status_name(status)
+    options: dict[str, Any] = {
+        "status": numeric_status,
+        "rootDir": root_dir,
+        "anime": anime,
+        "scene": scene,
+        "paused": paused,
+    }
+    if language:
+        options["language"] = language
+    if show_dir:
+        options["showDir"] = show_dir
+
+    body: dict[str, Any] = {
+        "id": {"tvdb": str(tvdb_id)},
+        "options": options,
+    }
+    return await _request("POST", "series", json=body)
+
 @mcp.tool()
 async def add_anime(
     anime_id: int,
@@ -789,8 +856,8 @@ async def add_anime(
     """Add an anime series to Medusa via /api/v2/anime/add.
 
     Note: Some anime may fail with "no name on TVDBv2" due to
-    AniDB→TVDB ID mapping issues. As a workaround, find the TVDB ID via
-    /api/v2/internal/searchIndexersForShowName and add via the series endpoint."""
+    AniDB→TVDB ID mapping issues. As a workaround, use search_tvdb to find
+    the correct TVDB ID, then add_series to add it directly."""
     body: dict[str, Any] = {
         "anime_id": anime_id,
         "source": _normalize_anime_source(source),
@@ -1152,7 +1219,7 @@ async def resolve_and_add_anime(
                 "Add queued but not confirmed in Medusa after polling. "
                 "The show queue likely failed (common cause: AniDB to TVDB mapping issue). "
                 "Use scheduler_status to check queue health, then fall back to "
-                "search_tvdb to find the TVDB ID and add via the series endpoint."
+                "search_tvdb to find the TVDB ID, then add_series to add it directly."
             )
 
     return response
