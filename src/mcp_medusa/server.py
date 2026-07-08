@@ -5,8 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import difflib
-import argparse
-import difflib
+import logging
 import os
 import re
 import textwrap
@@ -16,9 +15,7 @@ from typing import Any, Literal, cast
 from urllib.parse import urljoin
 
 import httpx
-import logging
 from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.server import Middleware, MiddlewareContext
 from mcp.server.transport_security import TransportSecuritySettings
 
 Season = Literal["WINTER", "SPRING", "SUMMER", "FALL"]
@@ -117,16 +114,6 @@ mcp = FastMCP(
 
 logger = logging.getLogger(__name__)
 
-
-class SessionReadyLogging(Middleware):
-    """Log when an MCP session completes initialization."""
-
-    async def on_initialize(self, context: MiddlewareContext, call_next):
-        await call_next(context)
-        logger.info("Session initialized — server ready for tool calls")
-
-
-mcp.add_middleware(SessionReadyLogging())
 
 
 class MedusaError(RuntimeError):
@@ -1262,7 +1249,7 @@ async def resolve_and_add_anime(
     # The bulk-add returns success as soon as the item is queued, but the actual
     # add happens asynchronously in the show queue and can fail (e.g. TVDB issues).
     if execute and response["success"]:
-        for attempt in range(1, verify_attempts + 1):
+        for _attempt in range(1, verify_attempts + 1):
             await asyncio.sleep(verify_delay_seconds)
             try:
                 info = await anime_info(mal_id=anime_id, source=query_source)
