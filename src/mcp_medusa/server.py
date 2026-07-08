@@ -839,6 +839,36 @@ async def add_series(
     }
     return await _request("POST", "series", json=body)
 
+
+@mcp.tool()
+async def set_episode_status(
+    series_slug: str,
+    episodes: list[str],
+    status: str = "wanted",
+) -> dict[str, Any]:
+    """Set episode statuses for a series via POST /api/v2/internal/updateEpisodeStatus.
+
+    Use when TVDB metadata is out of sync with actual episode status and
+    Medusa is not downloading episodes that should be available.  Set affected
+    episodes to "wanted" to force Medusa to search for them.
+
+    Args:
+        series_slug: Series slug (e.g. "tvdb370761").
+        episodes: Episode slugs (e.g. ["s01e01", "s01e02"]).
+        status: Target status string ("wanted", "skipped", "ignored").
+    """
+    numeric_status = _parse_status_name(status)
+    body = {
+        "status": numeric_status,
+        "shows": [
+            {
+                "slug": series_slug,
+                "episodes": episodes,
+            }
+        ],
+    }
+    return await _request("POST", "internal/updateEpisodeStatus", json=body)
+
 @mcp.tool()
 async def add_anime(
     anime_id: int,

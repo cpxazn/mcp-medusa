@@ -164,6 +164,59 @@ Resolves and dry-runs or executes a single add through Medusa's bulk-add endpoin
 }
 ```
 
+### `scheduler_status`
+
+Returns Medusa scheduler thread health and queue state. Use when anime adds appear stuck or unverified.
+
+```json
+{}
+```
+
+### `search_tvdb`
+
+Searches TVDB by show name for a TVDB ID. Use as fallback when an anime add fails due to AniDB-to-TVDB mapping issues.
+
+```json
+{ "query": "Dorohedoro", "language": "en" }
+```
+
+### `add_series`
+
+Adds a series directly by TVDB ID via `POST /api/v2/series`. Bypasses anime resolution entirely. Use after `search_tvdb` when `add_anime` fails.
+
+Arguments:
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `tvdb_id` | yes | none | TVDB show ID (from `search_tvdb`). |
+| `root_dir` | yes | none | Medusa root directory path. |
+| `anime` | no | `true` | |
+| `status` | no | `wanted` | Accepts strings like `wanted`, `skipped`, `ignored` — converted to numeric internally. |
+| `language` | no | none | Indexer language override. |
+| `show_dir` | no | none | Custom series folder name override. |
+| `scene` | no | `false` | |
+| `paused` | no | `false` | |
+
+```json
+{ "tvdb_id": 370761, "root_dir": "/media/videos/Anime" }
+```
+
+### `set_episode_status`
+
+Sets episode statuses for a series via `POST /api/v2/internal/updateEpisodeStatus`. Use when TVDB metadata is out of sync and Medusa is not downloading episodes that should be available.
+
+Arguments:
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `series_slug` | yes | none | Series slug (e.g. `tvdb370761`). |
+| `episodes` | yes | none | List of episode slugs (e.g. `["s01e01", "s01e02"]`). |
+| `status` | no | `wanted` | Target status: `wanted`, `skipped`, `ignored`. |
+
+```json
+{ "series_slug": "tvdb370761", "episodes": ["s01e01", "s01e02"], "status": "wanted" }
+```
+
 ### `bulk_add_anime`
 
 Dry-runs or executes multiple anime adds through `POST /api/v2/anime/bulk-add`. Writes require `execute: true`.
