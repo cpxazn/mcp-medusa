@@ -16,7 +16,9 @@ from typing import Any, Literal, cast
 from urllib.parse import urljoin
 
 import httpx
+import logging
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Middleware, MiddlewareContext
 from mcp.server.transport_security import TransportSecuritySettings
 
 Season = Literal["WINTER", "SPRING", "SUMMER", "FALL"]
@@ -112,6 +114,19 @@ mcp = FastMCP(
     port=DEFAULT_MCP_PORT,
     transport_security=_transport_security(),
 )
+
+logger = logging.getLogger(__name__)
+
+
+class SessionReadyLogging(Middleware):
+    """Log when an MCP session completes initialization."""
+
+    async def on_initialize(self, context: MiddlewareContext, call_next):
+        await call_next(context)
+        logger.info("Session initialized — server ready for tool calls")
+
+
+mcp.add_middleware(SessionReadyLogging())
 
 
 class MedusaError(RuntimeError):
@@ -863,6 +878,25 @@ async def set_episode_status(
     numeric_status = _parse_status_name(status)
     body = {ep_slug: {"status": numeric_status} for ep_slug in episodes}
     return await _request("PATCH", f"series/{series_slug}/episodes", json=body)
+
+
+@mcp.tool()
+async def force_search(
+    series_slug: str,
+    episodes: list[str],
+) -> Any:
+    """Force a manual search for specific episodes via PUT /api/v2/search/manual.
+
+    Queues a manual search that actively queries providers and snatches matching
+    releases.  Use after setting episode status to "wanted" when you want to
+    immediately search for and download episodes.
+
+    Args:
+        series_slug: Series slug (e.g. "tvdb370761").
+        episodes: Episode slugs (e.g. ["s01e01", "s01e02"]).
+    """
+    body = {"showSlug": series_slug, "episodes": episodes}
+    return await _request("PUT", "search/manual", json=body)
 
 @mcp.tool()
 async def add_anime(

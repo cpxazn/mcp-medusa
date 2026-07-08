@@ -217,6 +217,21 @@ Arguments:
 { "series_slug": "tvdb370761", "episodes": ["s01e01", "s01e02"], "status": "wanted" }
 ```
 
+### `force_search`
+
+Force a manual search for specific episodes via `PUT /api/v2/search/manual`. Queues a provider search that actively queries enabled providers and snatches matching releases. Use after setting episodes to "wanted".
+
+Arguments:
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `series_slug` | yes | none | Series slug (e.g. `tvdb370761`). |
+| `episodes` | yes | none | List of episode slugs (e.g. `["s01e01", "s01e02"]`). |
+
+```json
+{ "series_slug": "tvdb370761", "episodes": ["s01e01"] }
+```
+
 ### `bulk_add_anime`
 
 Dry-runs or executes multiple anime adds through `POST /api/v2/anime/bulk-add`. Writes require `execute: true`.
