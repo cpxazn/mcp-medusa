@@ -846,11 +846,14 @@ async def set_episode_status(
     episodes: list[str],
     status: str = "wanted",
 ) -> dict[str, Any]:
-    """Set episode statuses for a series via POST /api/v2/internal/updateEpisodeStatus.
+    """Set episode statuses for a series via PATCH /api/v2/episodes/{series_slug}.
 
     Use when TVDB metadata is out of sync with actual episode status and
     Medusa is not downloading episodes that should be available.  Set affected
     episodes to "wanted" to force Medusa to search for them.
+
+    Uses the same PATCH endpoint as the Medusa Web UI, so it can change
+    UNAIRED episodes to WANTED unlike the internal bulk-update endpoint.
 
     Args:
         series_slug: Series slug (e.g. "tvdb370761").
@@ -858,16 +861,8 @@ async def set_episode_status(
         status: Target status string ("wanted", "skipped", "ignored").
     """
     numeric_status = _parse_status_name(status)
-    body = {
-        "status": numeric_status,
-        "shows": [
-            {
-                "slug": series_slug,
-                "episodes": episodes,
-            }
-        ],
-    }
-    return await _request("POST", "internal/updateEpisodeStatus", json=body)
+    body = {ep_slug: {"status": numeric_status} for ep_slug in episodes}
+    return await _request("PATCH", f"episodes/{series_slug}", json=body)
 
 @mcp.tool()
 async def add_anime(
