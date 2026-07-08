@@ -862,7 +862,7 @@ async def set_episode_status(
     """
     numeric_status = _parse_status_name(status)
     body = {ep_slug: {"status": numeric_status} for ep_slug in episodes}
-    return await _request("PATCH", f"episodes/{series_slug}", json=body)
+    return await _request("PATCH", f"series/{series_slug}/episodes", json=body)
 
 @mcp.tool()
 async def add_anime(
