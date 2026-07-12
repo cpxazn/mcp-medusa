@@ -232,6 +232,24 @@ Arguments:
 { "series_slug": "tvdb370761", "episodes": ["s01e01"] }
 ```
 
+### `update_series_quality`
+
+Update allowed or preferred qualities for an existing series via `PATCH /api/v2/series/{slug}`. Uses human-readable quality names. Omitted fields are left unchanged.
+
+Arguments:
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `series_slug` | yes | none | Series slug (e.g. `tvdb370761`). |
+| `allowed_qualities` | no | none | Quality names for the allowed list. |
+| `preferred_qualities` | no | none | Quality names for the preferred list. |
+
+Quality names: `"SDTV"`, `"SD DVD"`, `"720p HDTV"`, `"RawHD"`, `"1080p HDTV"`, `"720p WEB-DL"`, `"1080p WEB-DL"`, `"720p BluRay"`, `"1080p BluRay"`, `"4K UHD TV"`, `"8K UHD TV"`, `"4K UHD WEB-DL"`, `"8K UHD WEB-DL"`, `"4K UHD BluRay"`, `"8K UHD BluRay"`.
+
+```json
+{ "series_slug": "tvdb370761", "allowed_qualities": ["1080p BluRay", "720p HDTV"] }
+```
+
 ### `bulk_add_anime`
 
 Dry-runs or executes multiple anime adds through `POST /api/v2/anime/bulk-add`. Writes require `execute: true`.

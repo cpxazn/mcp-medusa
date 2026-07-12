@@ -264,6 +264,41 @@ def _parse_status_name(status: str) -> int:
     )
 
 
+def _parse_quality_names(names: list[str] | None, *, label: str) -> list[int] | None:
+    """Convert human-readable quality names (e.g. '1080p BluRay') to Medusa
+    numeric quality values.  Returns None when input is None/empty."""
+    if not names:
+        return None
+    quality_map = {
+        "N/A": 0,
+        "Unknown": 1,
+        "SDTV": 2,
+        "SD DVD": 4,
+        "720p HDTV": 8,
+        "RawHD": 16,
+        "1080p HDTV": 32,
+        "720p WEB-DL": 64,
+        "1080p WEB-DL": 128,
+        "720p BluRay": 256,
+        "1080p BluRay": 512,
+        "4K UHD TV": 1024,
+        "8K UHD TV": 8192,
+        "4K UHD WEB-DL": 2048,
+        "8K UHD WEB-DL": 16384,
+        "4K UHD BluRay": 4096,
+        "8K UHD BluRay": 32768,
+    }
+    result: list[int] = []
+    for name in names:
+        value = quality_map.get(name)
+        if value is None:
+            raise MedusaError(
+                f"Unknown quality name: {name!r}. Valid: {', '.join(sorted(quality_map.keys()))}"
+            )
+        result.append(value)
+    return result
+
+
 async def _request(method: str, path: str, **kwargs: Any) -> Any:
     _, api_key = _settings()
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, headers=_headers(api_key)) as client:
@@ -815,13 +850,21 @@ async def add_series(
     show_dir: str | None = None,
     scene: bool = False,
     paused: bool = False,
+    allowed_qualities: list[str] | None = None,
+    preferred_qualities: list[str] | None = None,
 ) -> Any:
     """Add a series to Medusa directly by TVDB ID via POST /api/v2/series.
 
     Use this as a fallback when add_anime fails due to AniDB-to-TVDB mapping
     issues.  First find the correct TVDB ID with search_tvdb, then add it
     here.  This bypasses anime resolution entirely and adds via the standard
-    series endpoint."""
+    series endpoint.
+
+    quality values: "N/A", "Unknown", "SDTV", "SD DVD",
+    "720p HDTV", "RawHD", "1080p HDTV", "720p WEB-DL", "1080p WEB-DL",
+    "720p BluRay", "1080p BluRay", "4K UHD TV", "8K UHD TV",
+    "4K UHD WEB-DL", "8K UHD WEB-DL", "4K UHD BluRay", "8K UHD BluRay".
+    When omitted, Medusa's global quality defaults are used."""
     numeric_status = _parse_status_name(status)
     options: dict[str, Any] = {
         "status": numeric_status,
@@ -834,6 +877,13 @@ async def add_series(
         options["language"] = language
     if show_dir:
         options["showDir"] = show_dir
+    allowed = _parse_quality_names(allowed_qualities, label="allowed")
+    preferred = _parse_quality_names(preferred_qualities, label="preferred")
+    if allowed is not None or preferred is not None:
+        options["quality"] = {
+            "allowed": allowed or [],
+            "preferred": preferred or [],
+        }
 
     body: dict[str, Any] = {
         "id": {"tvdb": str(tvdb_id)},
@@ -884,6 +934,42 @@ async def force_search(
     """
     body = {"showSlug": series_slug, "episodes": episodes}
     return await _request("PUT", "search/manual", json=body)
+
+
+@mcp.tool()
+async def update_series_quality(
+    series_slug: str,
+    allowed_qualities: list[str] | None = None,
+    preferred_qualities: list[str] | None = None,
+) -> Any:
+    """Update allowed and/or preferred qualities for an existing series.
+
+    Sends PATCH /api/v2/series/{slug} with config.qualities.* fields.
+    Only the provided fields are changed; omitted fields are left as-is.
+
+    quality values: "N/A", "Unknown", "SDTV", "SD DVD",
+    "720p HDTV", "RawHD", "1080p HDTV", "720p WEB-DL", "1080p WEB-DL",
+    "720p BluRay", "1080p BluRay", "4K UHD TV", "8K UHD TV",
+    "4K UHD WEB-DL", "8K UHD WEB-DL", "4K UHD BluRay", "8K UHD BluRay".
+
+    Args:
+        series_slug: Series slug (e.g. "tvdb370761").
+        allowed_qualities: Quality names for the allowed list.
+        preferred_qualities: Quality names for the preferred list.
+    """
+    if allowed_qualities is None and preferred_qualities is None:
+        raise MedusaError(
+            "At least one of allowed_qualities or preferred_qualities must be provided"
+        )
+    config: dict[str, Any] = {}
+    allowed = _parse_quality_names(allowed_qualities, label="allowed")
+    preferred = _parse_quality_names(preferred_qualities, label="preferred")
+    if allowed is not None:
+        config["config.qualities.allowed"] = allowed
+    if preferred is not None:
+        config["config.qualities.preferred"] = preferred
+    return await _request("PATCH", f"series/{series_slug}", json=config)
+
 
 @mcp.tool()
 async def add_anime(
