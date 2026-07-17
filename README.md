@@ -250,6 +250,22 @@ Quality names: `"SDTV"`, `"SD DVD"`, `"720p HDTV"`, `"RawHD"`, `"1080p HDTV"`, `
 { "series_slug": "tvdb370761", "allowed_qualities": ["1080p BluRay", "720p HDTV"] }
 ```
 
+### `organize_season_folders`
+
+Enable season folders and move episode files into `Season XX/` subdirectories without renaming files. Calls `POST /api/v2/series/{slug}/operation` with `type=ORGANIZE_SEASON_FOLDERS`.
+
+Use when a multi-season anime has all files in a flat directory and Plex is missing episodes due to poor multi-season-in-one-folder support.
+
+Arguments:
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `series_slug` | yes | none | Series slug (e.g. `tvdb370761`). |
+
+```json
+{ "series_slug": "tvdb370761" }
+```
+
 ### `bulk_add_anime`
 
 Dry-runs or executes multiple anime adds through `POST /api/v2/anime/bulk-add`. Writes require `execute: true`.

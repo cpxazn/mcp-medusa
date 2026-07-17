@@ -115,7 +115,6 @@ mcp = FastMCP(
 logger = logging.getLogger(__name__)
 
 
-
 class MedusaError(RuntimeError):
     """Raised when Medusa returns an API error."""
 
@@ -259,9 +258,7 @@ def _parse_status_name(status: str) -> int:
     if status_lower in status_map:
         return status_map[status_lower]
 
-    raise MedusaError(
-        f"Unknown status: {status!r}. Valid: {', '.join(sorted(status_map.keys()))}"
-    )
+    raise MedusaError(f"Unknown status: {status!r}. Valid: {', '.join(sorted(status_map.keys()))}")
 
 
 def _parse_quality_names(names: list[str] | None, *, label: str) -> list[int] | None:
@@ -318,7 +315,6 @@ async def _request(method: str, path: str, **kwargs: Any) -> Any:
     return _unwrap_response(payload)
 
 
-
 def _scheduler_issue_summary(schedulers: dict[str, Any]) -> str | None:
     """Return a human-readable summary of any scheduler issues, or None if healthy."""
     issues: list[str] = []
@@ -332,10 +328,18 @@ def _scheduler_issue_summary(schedulers: dict[str, Any]) -> str | None:
         return " | ".join(issues)
 
     show_queue = schedulers.get("showQueue", {})
-    if show_queue.get("isAlive") and show_queue.get("isEnabled") and show_queue.get("queueLength", 0) > 0:
-        return f"ShowQueue has {show_queue['queueLength']} pending items (may be processing or stuck)"
+    if (
+        show_queue.get("isAlive")
+        and show_queue.get("isEnabled")
+        and show_queue.get("queueLength", 0) > 0
+    ):
+        return (
+            f"ShowQueue has {show_queue['queueLength']} pending items (may be processing or stuck)"
+        )
 
     return None
+
+
 def _normalize_title(value: Any) -> str:
     if value is None:
         return ""
@@ -485,6 +489,7 @@ def _details_summary(details: dict[str, Any], max_synopsis_chars: int) -> dict[s
         "genres": details.get("genres") or [],
         "studios": details.get("studios") or [],
         "matched": details.get("matched"),
+        "match": details.get("match"),
         "synopsis": _summarize_synopsis(details.get("synopsis"), max_synopsis_chars),
         "imageUrl": details.get("imageUrl"),
         "url": url,
@@ -827,16 +832,18 @@ async def search_tvdb(
     raw_results = payload.get("results", []) if isinstance(payload, dict) else []
     for entry in raw_results:
         if isinstance(entry, list) and len(entry) >= 5:
-            results.append({
-                "indexer": entry[0],
-                "indexerId": entry[1],
-                "url": entry[2] + str(entry[3]) if isinstance(entry[2], str) else "",
-                "tvdbId": entry[3],
-                "title": entry[4],
-                "firstAired": entry[5] if len(entry) > 5 else None,
-                "network": entry[6] if len(entry) > 6 else None,
-                "overview": entry[7] if len(entry) > 7 else None,
-            })
+            results.append(
+                {
+                    "indexer": entry[0],
+                    "indexerId": entry[1],
+                    "url": entry[2] + str(entry[3]) if isinstance(entry[2], str) else "",
+                    "tvdbId": entry[3],
+                    "title": entry[4],
+                    "firstAired": entry[5] if len(entry) > 5 else None,
+                    "network": entry[6] if len(entry) > 6 else None,
+                    "overview": entry[7] if len(entry) > 7 else None,
+                }
+            )
     return results
 
 
@@ -969,6 +976,34 @@ async def update_series_quality(
     if preferred is not None:
         config["config.qualities.preferred"] = preferred
     return await _request("PATCH", f"series/{series_slug}", json=config)
+
+
+@mcp.tool()
+async def organize_season_folders(
+    series_slug: str,
+) -> dict[str, Any]:
+    """Move episodes into Season XX/ subdirectories without renaming files.
+
+    Enables season folders on the series and moves all downloaded episode
+    files into Season XX/ subdirectories, preserving original filenames.
+    Also moves associated files (subtitles, etc.).
+
+    Use this when:
+    - A multi-season anime has all files in a flat directory
+    - Plex is missing episodes due to poor multi-season-in-one-folder support
+    - A second season was added years later to a show originally added flat
+
+    Calls POST /api/v2/series/{slug}/operation with
+    type=ORGANIZE_SEASON_FOLDERS.
+    """
+    payload = await _request(
+        "POST",
+        f"series/{series_slug}/operation",
+        json={"type": "ORGANIZE_SEASON_FOLDERS"},
+    )
+    if not isinstance(payload, dict):
+        raise MedusaError(f"Unexpected response: {type(payload).__name__}")
+    return payload
 
 
 @mcp.tool()
@@ -1143,6 +1178,23 @@ async def anime_info(
             "decision": resolution["decision"],
             "match": _compact_anime_summary(resolution.get("match") or {}),
         }
+
+    # ---- enrich matched block with series config ----
+    raw_match: dict[str, Any] | None = summary.get("match")
+    if summary.get("matched") and raw_match and raw_match.get("slug"):
+        try:
+            series_data = await _request("GET", f"series/{raw_match['slug']}")
+            if isinstance(series_data, dict):
+                config = series_data.get("config", {})
+                summary["match"] = {
+                    **raw_match,
+                    "seasonFolders": config.get("seasonFolders"),
+                    "paused": config.get("paused"),
+                    "showStatus": series_data.get("status"),
+                }
+        except MedusaError:
+            pass  # series endpoint unavailable — leave match as-is
+
     return summary
 
 
