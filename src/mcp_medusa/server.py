@@ -1523,6 +1523,25 @@ async def bulk_add_anime(
     }
 
 
+def _transport_security_kwargs() -> dict[str, Any]:
+    """Build fastmcp 3.x host-origin protection kwargs from env.
+
+    fastmcp 3.x replaces the old mcp.server.transport_security
+    TransportSecuritySettings with `allowed_hosts` / `allowed_origins`
+    on the HTTP/SSE transport. DNS-rebinding protection stays OFF by
+    default (matches prior behavior); set MCP_ALLOWED_HOSTS /
+    MCP_ALLOWED_ORIGINS (comma-separated) to enable.
+    """
+    kwargs: dict[str, Any] = {}
+    allowed_hosts = _csv_env("MCP_ALLOWED_HOSTS")
+    allowed_origins = _csv_env("MCP_ALLOWED_ORIGINS")
+    if allowed_hosts:
+        kwargs["allowed_hosts"] = allowed_hosts
+    if allowed_origins:
+        kwargs["allowed_origins"] = allowed_origins
+    return kwargs
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="MCP server for Medusa")
     parser.add_argument(
@@ -1532,11 +1551,16 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=DEFAULT_MCP_PORT)
     args = parser.parse_args()
 
-    if args.transport == "sse":
-        mcp.settings.host = args.host
-        mcp.settings.port = args.port
+    # fastmcp 3.x takes host/port as run() kwargs, but ONLY for the
+    # http/sse/streamable-http transports. stdio's run_stdio_async rejects
+    # them, so only pass them for non-stdio transports.
+    run_kwargs: dict[str, Any] = {}
+    if args.transport in {"sse", "http", "streamable-http"}:
+        run_kwargs["host"] = args.host
+        run_kwargs["port"] = args.port
+        run_kwargs.update(_transport_security_kwargs())
 
-    mcp.run(transport=args.transport)
+    mcp.run(transport=args.transport, **run_kwargs)
 
 
 if __name__ == "__main__":
