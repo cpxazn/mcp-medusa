@@ -42,11 +42,12 @@ jobs:
     steps:
       - name: Enable auto-merge (squash) on this PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # NOTE: GITHUB_TOKEN cannot merge PRs in this repo (GitHub limits
+          # the Actions token's merge capability). A PAT with `repo` scope
+          # must be stored as a repo secret named ACTIONS_PAT for this to work.
+          GH_TOKEN: ${{ secrets.ACTIONS_PAT }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           # boot-test (this job's dependency) already passed, so merge now.
-          # Using --squash (not --auto) avoids requiring the repo's
-          # "Allow auto-merge" setting; the gating is the job 'needs: boot-test'.
           gh pr merge "$PR" --squash \
             --repo "${{ github.repository }}"
