@@ -1,9 +1,12 @@
 name: Merge Release
 
 # Triggered when a PR is auto-merged (or pushed) to main. Re-runs the boot test
-# as a guard, then auto-creates a patch-bumped release (v0.0.N+1) off main.
-# The release:published event then fires docker-release.yml to build + push
-# the image. Full-auto: merge -> test -> release -> build, no human clicks.
+# as a guard, then auto-creates a patch-bumped release (v0.0.N+1) off main, and
+# builds + pushes the Docker image IN THIS WORKFLOW (a separate release-triggered
+# workflow is intentionally NOT used: GitHub suppresses the release:published
+# event when the release is created by a workflow via GITHUB_TOKEN, so the
+# cross-workflow trigger never fires). Full-auto: merge -> test -> release ->
+# build, no human clicks.
 
 on:
   push:
@@ -35,6 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.version.outputs.next }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,6 +64,7 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           NEXT: ${{ steps.version.outputs.next }}
         run: |
           gh release create "$NEXT" \
@@ -66,3 +72,41 @@ jobs:
             --title "$NEXT" \
             --notes "Automated release from merge to main. Boot tests passed (stdio + sse start, tools registered)." \
             --target main
+
+  docker:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ vars.DOCKERHUB_REPOSITORY || github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
