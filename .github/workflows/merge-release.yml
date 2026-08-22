@@ -1,0 +1,69 @@
+name: Merge Release
+
+# Triggered when a PR is auto-merged (or pushed) to main. Re-runs the boot test
+# as a guard, then auto-creates a patch-bumped release (v0.0.N+1) off main.
+# The release:published event then fires docker-release.yml to build + push
+# the image. Full-auto: merge -> test -> release -> build, no human clicks.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  boot-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Create venv and install package + test deps
+        run: |
+          uv venv
+          uv pip install -e ".[test]"
+
+      - name: Run boot/integration tests
+        run: uv run pytest tests/ -v
+
+  release:
+    needs: boot-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need tag history to compute next patch version
+
+      - name: Compute next patch version (v0.0.N+1)
+        id: version
+        run: |
+          # Latest v0.0.* tag, bump patch. Falls back to v0.0.1 if none.
+          LATEST=$(git tag --list 'v0.0.*' | sed 's/^v//' | sort -t. -k3 -n | tail -1)
+          if [ -z "$LATEST" ]; then
+            NEXT="v0.0.1"
+          else
+            MAJOR=$(echo "$LATEST" | cut -d. -f1)
+            MINOR=$(echo "$LATEST" | cut -d. -f2)
+            PATCH=$(echo "$LATEST" | cut -d. -f3)
+            NEXT="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Next release version: $NEXT"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          gh release create "$NEXT" \
+            --repo "${{ github.repository }}" \
+            --title "$NEXT" \
+            --notes "Automated release from merge to main. Boot tests passed (stdio + sse start, tools registered)." \
+            --target main
