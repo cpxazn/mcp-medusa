@@ -1511,9 +1511,13 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=DEFAULT_MCP_PORT)
     args = parser.parse_args()
 
-    # fastmcp 3.x takes host/port as run() kwargs (no mcp.settings attribute)
-    run_kwargs = {"host": args.host, "port": args.port}
+    # fastmcp 3.x takes host/port as run() kwargs, but ONLY for the
+    # http/sse/streamable-http transports. stdio's run_stdio_async rejects
+    # them, so only pass them for non-stdio transports.
+    run_kwargs: dict[str, Any] = {}
     if args.transport in {"sse", "http", "streamable-http"}:
+        run_kwargs["host"] = args.host
+        run_kwargs["port"] = args.port
         run_kwargs.update(_transport_security_kwargs())
 
     mcp.run(transport=args.transport, **run_kwargs)
