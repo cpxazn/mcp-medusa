@@ -350,3 +350,41 @@ docker run --rm -i \
   -e MEDUSA_API_KEY=... \
   mcp-medusa --transport stdio
 ```
+
+## CI/CD
+
+The repo uses a fully automated pipeline (no manual release steps):
+
+1. **Open a PR** against `main`. The `ci.yml` workflow runs `tests/test_boot.py`,
+   which actually starts the server (stdio + SSE) and asserts `FastMCP`
+   constructs, the expected tools register, and both transports bind. This is
+   the gate that catches boot/import crashes before they ship.
+2. **Auto-merge.** Once the boot test passes, the `enable-auto-merge` job merges
+   the PR (squash) using the `ACTIONS_PAT` repo secret (the default
+   `GITHUB_TOKEN` cannot merge PRs in this repo).
+3. **Auto-release.** Pushing to `main` triggers `merge-release.yml`, which
+   re-runs the boot test and then creates a patch-bumped release
+   (`v0.0.N+1`) off `main`.
+4. **Auto-build.** The `release: published` event fires `docker-release.yml`,
+   which builds and pushes the image to Docker Hub.
+
+### Running the tests locally
+
+```bash
+uv venv
+uv pip install -e ".[test]"
+uv run pytest tests/ -v
+```
+
+The boot test spawns the real server, so it needs no Docker. If you change
+anything in `server.py` startup path, run this before pushing — CI will block
+the merge if the server fails to boot.
+
+### Required secrets
+
+- `ACTIONS_PAT` — a fine-grained PAT (or classic `repo` token) with
+  **Contents: read+write** and **Pull requests: read+write**, stored as a repo
+  secret. Used by `ci.yml` to merge PRs. (The default `GITHUB_TOKEN` lacks
+  merge capability here.)
+- `DOCKER_USERNAME` / `DOCKER_PASSWORD` — used by `docker-release.yml` to push
+  the image.
