@@ -266,6 +266,25 @@ Arguments:
 { "series_slug": "tvdb370761" }
 ```
 
+### `postprocess`
+
+Trigger Medusa manual post-processing on a directory. Scans a download/staging folder and moves matched episodes into their show folders. Reuses the `MEDUSA_URL` / `MEDUSA_API_KEY` credentials. Use this to clear files stranded in staging after a failed auto-post-process (e.g. a mis-named release the download handler bailed on). Calls `POST /api/v2/postprocess`.
+
+**IMPORTANT:** the `directory` argument is interpreted by **Medusa core**, so it must be the path as seen inside the Medusa container (e.g. `/data/medusa`), NOT the path visible from a separate Hermes container.
+
+Arguments:
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `directory` | no | `/data/medusa` | Medusa-container path to scan. Must match Medusa core's view, not the Hermes mount. |
+| `process_type` | no | `auto` | `auto`, `manual`, or `failed`. |
+| `force_replace` | no | `false` | Overwrite existing episode files. |
+| `process_method` | no | `copy` | `copy` or `move`. |
+
+```json
+{ "proc_dir": "/data/medusa", "proc_type": "auto" }
+```
+
 ### `bulk_add_anime`
 
 Dry-runs or executes multiple anime adds through `POST /api/v2/anime/bulk-add`. Writes require `execute: true`.
