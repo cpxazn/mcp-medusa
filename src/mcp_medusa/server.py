@@ -15,8 +15,7 @@ from typing import Any, Literal, cast
 from urllib.parse import urljoin
 
 import httpx
-from mcp.server.fastmcp import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
+from fastmcp import FastMCP
 
 Season = Literal["WINTER", "SPRING", "SUMMER", "FALL"]
 AnimeSource = Literal["myanimelist", "livechart"]
@@ -91,25 +90,8 @@ def _csv_env(name: str) -> list[str]:
     return [value.strip() for value in os.getenv(name, "").split(",") if value.strip()]
 
 
-def _transport_security() -> TransportSecuritySettings:
-    enabled = os.getenv("MCP_DNS_REBINDING_PROTECTION", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    return TransportSecuritySettings(
-        enable_dns_rebinding_protection=enabled,
-        allowed_hosts=_csv_env("MCP_ALLOWED_HOSTS"),
-        allowed_origins=_csv_env("MCP_ALLOWED_ORIGINS"),
-    )
-
-
 mcp = FastMCP(
     "mcp-medusa",
-    host=DEFAULT_MCP_HOST,
-    port=DEFAULT_MCP_PORT,
-    transport_security=_transport_security(),
 )
 
 logger = logging.getLogger(__name__)
