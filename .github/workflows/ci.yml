@@ -45,5 +45,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          gh pr merge "$PR" --auto --squash \
+          # boot-test (this job's dependency) already passed, so merge now.
+          # Using --squash (not --auto) avoids requiring the repo's
+          # "Allow auto-merge" setting; the gating is the job 'needs: boot-test'.
+          gh pr merge "$PR" --squash \
             --repo "${{ github.repository }}"
