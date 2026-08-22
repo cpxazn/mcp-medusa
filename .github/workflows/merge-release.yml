@@ -23,9 +23,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Create venv and install package + test deps
+      - name: Install package + test deps into the setup-uv venv
         run: |
-          uv venv
           uv pip install -e ".[test]"
 
       - name: Run boot/integration tests
