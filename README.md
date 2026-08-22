@@ -362,11 +362,12 @@ The repo uses a fully automated pipeline (no manual release steps):
 2. **Auto-merge.** Once the boot test passes, the `enable-auto-merge` job merges
    the PR (squash) using the `ACTIONS_PAT` repo secret (the default
    `GITHUB_TOKEN` cannot merge PRs in this repo).
-3. **Auto-release.** Pushing to `main` triggers `merge-release.yml`, which
-   re-runs the boot test and then creates a patch-bumped release
-   (`v0.0.N+1`) off `main`.
-4. **Auto-build.** The `release: published` event fires `docker-release.yml`,
-   which builds and pushes the image to Docker Hub.
+3. **Auto-release + build.** Pushing to `main` triggers `merge-release.yml`, which
+   re-runs the boot test, creates a patch-bumped release (`v0.0.N+1`) off `main`,
+   and **builds + pushes the Docker image in the same workflow** (the build is
+   folded into `merge-release.yml` rather than a separate release-triggered
+   workflow, because GitHub suppresses the `release: published` event when the
+   release is created by a workflow via `GITHUB_TOKEN`).
 
 ### Running the tests locally
 
