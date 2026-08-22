@@ -815,6 +815,46 @@ async def scheduler_status() -> dict[str, Any]:
 
 
 @mcp.tool()
+async def postprocess(
+    directory: str = "/data/medusa",
+    process_type: Literal["auto", "manual", "failed"] = "auto",
+    force_replace: bool = False,
+    process_method: str = "copy",
+) -> dict[str, Any]:
+    """Trigger Medusa manual post-processing on a directory.
+
+    Scans `directory` (a download/staging folder) and moves matched
+    episodes into their show folders. Reuses Medusa credentials from
+    MEDUSA_URL / MEDUSA_API_KEY. Use this to clear files stranded in
+    staging after a failed auto-post-process (e.g. a mis-named release
+    that the download handler bailed on).
+
+    IMPORTANT: `directory` is interpreted by MEDUSA CORE, so it must be
+    the path as seen inside the Medusa container (e.g. /data/medusa),
+    NOT the path visible from the Hermes container.
+
+    Args:
+        directory: Medusa-container path to scan (default /data/medusa).
+        process_type: 'auto' (guess), 'manual' (use names), 'failed'.
+        force_replace: Overwrite existing episode files.
+        process_method: 'copy' or 'move'.
+
+    Returns Medusa's post-process result (summary of processed files).
+    """
+    body = {
+        "proc_dir": directory,
+        "proc_type": process_type,
+        "force": force_replace,
+        "process_method": process_method,
+    }
+    # Medusa's POST /api/v2/postprocess expects a JSON body
+    # (json_decode(self.request.body)); field names verified against
+    # medusa/server/api/v2/postprocess.py: 'proc_dir', 'proc_type',
+    # 'force' (bool), 'failed' (bool), 'process_method'.
+    return await _request("POST", "postprocess", json=body)
+
+
+@mcp.tool()
 async def search_tvdb(
     query: str,
     language: str = "en",
