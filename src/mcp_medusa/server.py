@@ -1070,6 +1070,54 @@ async def add_anime(
     return await _request("POST", "anime/add", json=body)
 
 
+ANIME_IDENTITY_VERSION = 1
+ANIME_ADD_OUTCOMES = frozenset({
+    "already_exists",
+    "ready_to_add",
+    "needs_review",
+    "mapping_failed",
+    "queued",
+    "already_queued",
+    "invalid",
+    "not_found",
+    "error",
+})
+
+
+def _positive_id(value: Any) -> bool:
+    return type(value) is int and value > 0
+
+
+def _anime_add_error(
+    outcome: str, reason: str, message: str, **fields: Any
+) -> dict[str, Any]:
+    return {
+        **fields,
+        "outcome": outcome,
+        "action": outcome,
+        "success": False,
+        "matched": False,
+        "reason": reason,
+        "error": message,
+    }
+
+
+def _valid_anime_add_result(result: Any, anime_id: int, allowed: frozenset[str]) -> bool:
+    if not isinstance(result, dict) or result.get("animeId") != anime_id:
+        return False
+    outcome = result.get("outcome")
+    if not isinstance(outcome, str) or outcome not in allowed:
+        return False
+    if outcome in {"ready_to_add", "queued"}:
+        return _positive_id(result.get("tvdbId"))
+    if outcome == "already_exists":
+        match = result.get("match")
+        return isinstance(match, dict) and all(
+            isinstance(match.get(field), str) and match[field] for field in ("slug", "title")
+        )
+    return True
+
+
 async def _bulk_add_request(
     items: list[dict[str, Any]],
     source: str,
@@ -1077,8 +1125,7 @@ async def _bulk_add_request(
     initial_release_group: str | None,
     release_group_fallback_days: int,
     fallback_release_groups: list[str] | None,
-    dry_run: bool,
-    verify: bool,
+    execute: bool,
 ) -> dict[str, Any]:
     defaults: dict[str, Any] = {
         "source": _normalize_anime_source(source),
@@ -1096,14 +1143,80 @@ async def _bulk_add_request(
         {key: value for key, value in optional_defaults.items() if value not in (None, "", [])}
     )
 
-    payload = await _request(
-        "POST",
-        "anime/bulk-add",
-        json={"defaults": defaults, "items": items, "dry_run": dry_run, "verify": verify},
-    )
-    if not isinstance(payload, dict):
-        raise MedusaError(f"unexpected bulk add payload shape: {type(payload).__name__}")
-    return payload
+    async def request(batch: list[dict[str, Any]], *, dry_run: bool) -> list[dict[str, Any]]:
+        def errors(reason: str, message: str) -> list[dict[str, Any]]:
+            return [
+                _anime_add_error("error", reason, message, animeId=item["anime_id"])
+                for item in batch
+            ]
+
+        try:
+            payload = await _request(
+                "POST",
+                "anime/bulk-add",
+                json={
+                    "defaults": defaults,
+                    "items": batch,
+                    "dry_run": dry_run,
+                    "verify": False,
+                    "identity_version": ANIME_IDENTITY_VERSION,
+                },
+            )
+        except (MedusaError, httpx.RequestError) as exc:
+            if dry_run:
+                return errors("identity_preflight_failed", f"No adds sent: {exc}")
+            return errors("write_unconfirmed", f"Could not confirm the add request: {exc}")
+
+        version = payload.get("identityVersion") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict) or type(version) is not int or version != ANIME_IDENTITY_VERSION:
+            if dry_run:
+                return errors(
+                    "unsupported_identity_version",
+                    "Medusa did not advertise anime identityVersion 1; no adds sent.",
+                )
+            return errors("write_unconfirmed", "Medusa did not confirm identityVersion 1 for the add request.")
+
+        results = payload.get("results")
+        allowed = ANIME_ADD_OUTCOMES - ({"queued"} if dry_run else {"ready_to_add"})
+        if not isinstance(results, list) or len(results) != len(batch) or any(
+            not _valid_anime_add_result(result, item["anime_id"], allowed)
+            for item, result in zip(batch, results)
+        ):
+            if dry_run:
+                return errors("invalid_identity_response", "Invalid Medusa identity results; no adds sent.")
+            return errors("write_unconfirmed", "Invalid Medusa identity results for the add request.")
+        return results
+
+    # Older servers ignore identity_version. A versioned dry run, never a write,
+    # is how we discover support. Replay only ready items and let Medusa recheck.
+    results = await request(items, dry_run=True)
+    ready_indices = [i for i, result in enumerate(results) if result["outcome"] == "ready_to_add"]
+    if execute and ready_indices:
+        written = await request([items[i] for i in ready_indices], dry_run=False)
+        for i, result in zip(ready_indices, written):
+            results[i] = result
+    return {
+        "dryRun": not execute,
+        "requested": len(items),
+        "successes": sum(1 for result in results if result.get("success")),
+        "failures": sum(1 for result in results if not result.get("success")),
+        "results": results,
+    }
+
+
+async def _verify_anime_series(tvdb_id: int, attempts: int, delay_seconds: float) -> dict[str, Any] | None:
+    slug = f"tvdb{tvdb_id}"
+    for attempt in range(attempts):
+        if attempt:
+            await asyncio.sleep(delay_seconds)
+        try:
+            series = await _request("GET", f"series/{slug}")
+        except (MedusaError, httpx.RequestError):
+            continue
+        ids = series.get("id") if isinstance(series, dict) else None
+        if isinstance(ids, dict) and ids.get("slug") == slug:
+            return {"slug": slug, "title": series.get("title")}
+    return None
 
 
 @mcp.tool()
@@ -1342,25 +1455,45 @@ async def resolve_and_add_anime(
     verify_delay_seconds: float = 5.0,
     execute: bool = False,
 ) -> dict[str, Any]:
-    """Resolve and optionally add one anime. Dry-run unless execute is true."""
-    query_source = _normalize_anime_source(source)
-    match: dict[str, Any] | None
+    """Resolve one anime and report its add outcome. Dry-run unless execute is true."""
+    try:
+        query_source = _normalize_anime_source(source)
+    except MedusaError as exc:
+        return _anime_add_error("invalid", "invalid_source", str(exc))
+    catalog_match: dict[str, Any] = {}
     candidates: list[dict[str, Any]] = []
 
     if mal_id is not None:
-        match = await _anime_details(mal_id, query_source)
+        # An explicit ID goes straight to the identity-aware endpoint. The
+        # legacy anime details match is not evidence of library identity.
+        anime_id = mal_id
+        if not _positive_id(anime_id):
+            return _anime_add_error("invalid", "invalid_anime_id", "mal_id must be a positive integer.")
     else:
-        if not title:
-            raise MedusaError("provide title or mal_id")
-        resolution = await resolve_anime_title(title, query_source, limit, min_score, score_gap)
+        if not title or not title.strip():
+            return _anime_add_error("invalid", "missing_anime_query", "Provide title or mal_id.")
+        try:
+            resolution = await resolve_anime_title(title, query_source, limit, min_score, score_gap)
+        except (MedusaError, httpx.RequestError) as exc:
+            return _anime_add_error("error", "catalog_search_failed", str(exc))
         if resolution["decision"] != "match":
-            return resolution
-        match = resolution.get("match")
+            if resolution["decision"] == "ambiguous":
+                return _anime_add_error(
+                    "needs_review", "ambiguous_catalog_title", "Select a catalog candidate by ID.", **resolution,
+                )
+            return _anime_add_error(
+                "not_found", "catalog_title_not_found", "No catalog candidates found.", **resolution,
+            )
+        catalog_match = resolution.get("match") or {}
         candidates = resolution.get("candidates") or []
-
-    anime_id = (match or {}).get("animeId") or (match or {}).get("malId")
-    if not isinstance(anime_id, int):
-        raise MedusaError("resolved match did not include an integer MAL ID")
+        anime_id = catalog_match.get("animeId")
+        if anime_id is None:
+            anime_id = catalog_match.get("malId")
+        if not _positive_id(anime_id):
+            return _anime_add_error(
+                "error", "invalid_catalog_result", "Resolved candidate did not include a valid anime ID.",
+                candidates=candidates,
+            )
 
     bulk_item: dict[str, Any] = {"anime_id": anime_id}
     if directory_name:
@@ -1380,7 +1513,6 @@ async def resolve_and_add_anime(
     }
     plan = {
         "decision": "execute" if execute else "dry_run",
-        "match": _compact_anime_summary(match or {}),
         "addArguments": add_arguments,
     }
     if candidates:
@@ -1393,39 +1525,39 @@ async def resolve_and_add_anime(
         initial_release_group,
         release_group_fallback_days,
         fallback_release_groups,
-        dry_run=not execute,
-        verify=execute,
+        execute=execute,
     )
-    first_result = (add_result.get("results") or [{}])[0]
-
+    result = add_result["results"][0]
+    outcome = result["outcome"]
+    catalog_summary = _compact_anime_summary(
+        catalog_match or {"animeId": anime_id, "displayTitle": result.get("displayTitle")}
+    )
+    catalog_summary["matched"] = result.get("matched", False)
+    series_match = result.get("match")
     response: dict[str, Any] = {
         **plan,
         "addResult": add_result,
-        "result": first_result,
-        "success": bool(first_result.get("success")),
+        "result": result,
+        "outcome": outcome,
+        "success": bool(result.get("success")),
+        "matched": result.get("matched", False),
+        "match": {**catalog_summary, **(series_match if isinstance(series_match, dict) else {})},
     }
+    for field in ("tvdbId", "reason", "error", "candidates"):
+        if field in result:
+            response[field] = result[field]
 
-    # Post-add verification: poll anime_info to confirm the show actually landed.
-    # The bulk-add returns success as soon as the item is queued, but the actual
-    # add happens asynchronously in the show queue and can fail (e.g. TVDB issues).
-    if execute and response["success"]:
-        for _attempt in range(1, verify_attempts + 1):
-            await asyncio.sleep(verify_delay_seconds)
-            try:
-                info = await anime_info(mal_id=anime_id, source=query_source)
-            except MedusaError:
-                continue
-            if isinstance(info, dict) and info.get("matched"):
-                response["verified"] = True
-                response["match"] = info
-                break
+    tvdb_id = result.get("tvdbId")
+    if execute and outcome in {"queued", "already_queued"} and _positive_id(tvdb_id) and verify_attempts > 0:
+        verified_match = await _verify_anime_series(tvdb_id, verify_attempts, verify_delay_seconds)
+        response["verified"] = verified_match is not None
+        if verified_match is not None:
+            response["matched"] = True
+            response["match"] = {**response["match"], **verified_match, "matched": True}
         else:
-            response["verified"] = False
             response["verificationHint"] = (
-                "Add queued but not confirmed in Medusa after polling. "
-                "The show queue likely failed (common cause: AniDB to TVDB mapping issue). "
-                "Use scheduler_status to check queue health, then fall back to "
-                "search_tvdb to find the TVDB ID, then add_series to add it directly."
+                f"Add queued; tvdb{tvdb_id} was not confirmed during polling. "
+                "It may still be pending. Use scheduler_status to check the queue."
             )
 
     return response
@@ -1448,7 +1580,7 @@ async def bulk_add_anime(
     execute: bool = False,
 ) -> dict[str, Any]:
     """Dry-run or add multiple anime items. Skips filterDecision=skip; execute must be true for writes."""
-    # Kept for backward-compatible MCP schemas; Medusa bulk-add now owns pacing/verification.
+    # Kept for backward-compatible MCP schemas; bulk adds report queue outcomes.
     _ = (pause_seconds, verify_attempts, verify_delay_seconds)
     query_source = _normalize_anime_source(source)
     allowed = {value.casefold() for value in (allowed_decisions or ["add"])}
@@ -1465,9 +1597,11 @@ async def bulk_add_anime(
         selected = selected[:max_items]
 
     request_items: list[dict[str, Any]] = []
-    local_failures: list[dict[str, Any]] = []
-    for item in selected:
-        anime_id = item.get("animeId") or item.get("malId")
+    local_failures: dict[int, dict[str, Any]] = {}
+    for index, item in enumerate(selected):
+        anime_id = item.get("animeId")
+        if anime_id is None:
+            anime_id = item.get("malId")
         title = (
             item.get("displayTitle")
             or item.get("titleEnglish")
@@ -1475,14 +1609,10 @@ async def bulk_add_anime(
             or anime_id
             or "(untitled)"
         )
-        if not isinstance(anime_id, int):
-            local_failures.append(
-                {
-                    "title": title,
-                    "success": False,
-                    "error": "Missing animeId/malId.",
-                    "dryRun": not execute,
-                }
+        if not _positive_id(anime_id):
+            local_failures[index] = _anime_add_error(
+                "invalid", "invalid_anime_id", "Provide a positive integer animeId/malId.",
+                title=title, animeId=anime_id, dryRun=not execute,
             )
             continue
 
@@ -1500,8 +1630,7 @@ async def bulk_add_anime(
             initial_release_group,
             release_group_fallback_days,
             fallback_release_groups,
-            dry_run=not execute,
-            verify=execute,
+            execute=execute,
         )
     else:
         response = {
@@ -1512,13 +1641,17 @@ async def bulk_add_anime(
             "results": [],
         }
 
-    results = [*(response.get("results") or []), *local_failures]
+    remote_results = iter(response["results"])
+    results = [
+        local_failures[i] if i in local_failures else next(remote_results)
+        for i in range(len(selected))
+    ]
     return {
         **response,
         "execute": execute,
         "count": len(results),
         "successes": sum(1 for item in results if item.get("success")),
-        "failures": sum(1 for item in results if item.get("success") is False),
+        "failures": sum(1 for item in results if not item.get("success")),
         "results": results,
     }
 

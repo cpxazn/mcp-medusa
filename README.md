@@ -154,7 +154,7 @@ Compacts seasonal candidate items into an AI review packet with conservative rev
 
 ### `resolve_and_add_anime`
 
-Resolves and dry-runs or executes a single add through Medusa's bulk-add endpoint. Writes require `execute: true`.
+Resolves a catalog title or takes a `mal_id` directly, then dry-runs or executes one add through Medusa's bulk-add endpoint. Writes require `execute: true`. Branch on the top-level `outcome` (see [Anime add outcomes](#anime-add-outcomes)); `result` contains the per-item Medusa response when a catalog ID was submitted.
 
 ```json
 {
@@ -163,6 +163,8 @@ Resolves and dry-runs or executes a single add through Medusa's bulk-add endpoin
   "execute": false
 }
 ```
+
+On `queued` or `already_queued`, the single tool can poll `GET /api/v2/series/tvdb<ID>` for that exact TVDB slug (`verify_attempts: 0` disables polling). `verified: true` confirms library series presence; `verified: false` means the series was not confirmed yet, not that the queued add failed.
 
 ### `scheduler_status`
 
@@ -287,7 +289,7 @@ Arguments:
 
 ### `bulk_add_anime`
 
-Dry-runs or executes multiple anime adds through `POST /api/v2/anime/bulk-add`. Writes require `execute: true`.
+Dry-runs or executes multiple anime adds through `POST /api/v2/anime/bulk-add`. Writes require `execute: true`. Each selected item has an `outcome` in `results`, in input order. `count` includes local validation results; `requested` counts items sent to Medusa. Bulk reports queue acceptance without polling for library presence.
 
 ```json
 {
@@ -297,6 +299,26 @@ Dry-runs or executes multiple anime adds through `POST /api/v2/anime/bulk-add`. 
   "execute": false
 }
 ```
+
+### Anime add outcomes
+
+Use `outcome` rather than legacy fields such as `action` or `success`, or comparing title strings:
+
+| Outcome | Meaning |
+| --- | --- |
+| `already_exists` | The same series is in Medusa. `match.slug` and `match.title` identify it. |
+| `ready_to_add` | Dry-run identity and mapping checks passed. `tvdbId` identifies the target. |
+| `needs_review` | Catalog title or library identity is uncertain. Inspect `candidates` and `reason`/`error` when provided. |
+| `mapping_failed` | Medusa could not map the catalog entry to a TVDB series. |
+| `queued` | Medusa accepted an asynchronous add for `tvdbId`. |
+| `already_queued` | The add was already pending. |
+| `invalid` | The request or item is invalid. |
+| `not_found` | The requested title or catalog ID was not found. |
+| `error` | The tool could not complete or confirm the request; inspect `reason`/`error`. |
+
+`matched: true` means library **series** identity, not a downloaded season or episode. The single tool does not use fuzzy `anime_info`/search presence to skip or verify an add.
+
+Both tools require Medusa's bulk-add response to advertise `identityVersion: 1`. An execute call first sends one non-writing preflight for the selected batch, then submits only `ready_to_add` items for Medusa to recheck before queueing. A legacy dry run is not accepted as proof of safety; a missing or unsupported marker returns `error` with `reason: "unsupported_identity_version"` and sends no write. If a write was sent but could not be confirmed (`reason: "write_unconfirmed"`), check the queue before retrying.
 
 ## Configuration
 
