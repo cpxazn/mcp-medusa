@@ -1455,7 +1455,13 @@ async def resolve_and_add_anime(
     verify_delay_seconds: float = 5.0,
     execute: bool = False,
 ) -> dict[str, Any]:
-    """Resolve one anime and report its add outcome. Dry-run unless execute is true."""
+    """Resolve one anime and report its add outcome. Dry-run unless execute is true.
+
+    Act on outcome, not title similarity: already_exists means skip (see match.slug);
+    ready_to_add means execute only if authorized; needs_review means show candidates
+    without adding; mapping_failed means use a confirmed TVDB ID with add_series.
+    queued and already_queued are not proof of installation or episode downloads.
+    """
     try:
         query_source = _normalize_anime_source(source)
     except MedusaError as exc:
@@ -1579,7 +1585,12 @@ async def bulk_add_anime(
     verify_delay_seconds: float = 5.0,
     execute: bool = False,
 ) -> dict[str, Any]:
-    """Dry-run or add multiple anime items. Skips filterDecision=skip; execute must be true for writes."""
+    """Dry-run or add multiple anime items; skips filterDecision=skip.
+
+    Read each results[].outcome as in resolve_and_add_anime. With execute=true,
+    only items that pass the dry-run as ready_to_add are submitted. already_exists
+    and already_queued are skips; needs_review and mapping_failed need follow-up.
+    """
     # Kept for backward-compatible MCP schemas; bulk adds report queue outcomes.
     _ = (pause_seconds, verify_attempts, verify_delay_seconds)
     query_source = _normalize_anime_source(source)
